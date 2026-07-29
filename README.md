@@ -9,6 +9,8 @@ El proyecto está construido con .NET 10 y Windows Forms. Está pensado para el 
 - Selección de dos carpetas `.codex` de origen.
 - Selección de una carpeta de salida independiente.
 - Selector opcional para `sqlite3.exe` cuando la CLI de SQLite no está en `PATH`.
+- Análisis previo con un resumen de todas las sesiones encontradas.
+- Selector por conflicto para conservar la versión A o B de una sesión divergente; se preselecciona la más reciente.
 - Fusión recursiva de `sessions/` y `archived_sessions/`.
 - Deduplicación de archivos idénticos mediante SHA-256.
 - Conservación de colisiones de archivos con nombres alternativos (`-from-a` y `-from-b`).
@@ -33,7 +35,9 @@ dotnet build CodexSync.slnx
 dotnet run --project .\CodexSync.App\CodexSync.App.csproj
 ```
 
-En la ventana, seleccione las dos carpetas de origen, una carpeta de salida vacía y, si hace falta, el ejecutable de SQLite. Después pulse **Fusionar en carpeta de salida**.
+En la ventana, seleccione las dos carpetas de origen, una carpeta de salida vacía y, si hace falta, el ejecutable de SQLite. Pulse **Analizar conversaciones…**, revise el resumen y seleccione A o B en cada conflicto. Al confirmar, pulse **Fusionar en carpeta de salida**.
+
+Una sesión aparece como conflicto cuando existe en ambos equipos en la misma ruta, pero sus contenidos son distintos. La elección determina cuál de los dos archivos de sesión se escribe en la ruta original de la carpeta de salida; no se crean copias alternativas para esos conflictos.
 
 ## Estructura
 
@@ -52,4 +56,3 @@ La solución se verifica con:
 ```powershell
 dotnet build CodexSync.slnx --no-restore
 ```
-

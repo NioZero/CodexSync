@@ -6,9 +6,11 @@ public sealed class MainForm : Form
     private readonly TextBox _secondSource = CreatePathTextBox();
     private readonly TextBox _output = CreatePathTextBox();
     private readonly TextBox _sqlite = CreatePathTextBox();
+    private readonly Button _analyzeButton = new() { Text = "Analizar conversaciones…", AutoSize = true, Padding = new Padding(12, 6, 12, 6) };
     private readonly Button _mergeButton = new() { Text = "Fusionar en carpeta de salida", AutoSize = true, Padding = new Padding(12, 6, 12, 6) };
     private readonly RichTextBox _log = new() { ReadOnly = true, BackColor = SystemColors.Window, BorderStyle = BorderStyle.FixedSingle, Dock = DockStyle.Fill, Font = new Font("Consolas", 9F) };
     private readonly ProgressBar _progress = new() { Style = ProgressBarStyle.Marquee, MarqueeAnimationSpeed = 28, Visible = false, Dock = DockStyle.Fill };
+    private HistoryMergePlan? _plan;
 
     public MainForm()
     {
@@ -45,7 +47,7 @@ public sealed class MainForm : Form
 
         var hint = new Label
         {
-            Text = "La salida debe ser una carpeta vacía. Se fusionan sessions/, archived_sessions/, session_index.jsonl y state_5.sqlite. Las carpetas originales nunca se modifican.",
+            Text = "Primero analice las conversaciones para revisar nuevas sesiones y resolver conflictos. La salida debe estar vacía; las carpetas originales nunca se modifican.",
             AutoSize = true,
             MaximumSize = new Size(900, 0),
             ForeColor = SystemColors.GrayText,
@@ -55,6 +57,7 @@ public sealed class MainForm : Form
         layout.SetColumnSpan(hint, 3);
 
         var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+        actions.Controls.Add(_analyzeButton);
         actions.Controls.Add(_mergeButton);
         layout.Controls.Add(actions, 0, 6);
         layout.SetColumnSpan(actions, 3);
@@ -65,7 +68,10 @@ public sealed class MainForm : Form
         layout.SetColumnSpan(_progress, 3);
         Controls.Add(layout);
 
+        _analyzeButton.Click += AnalyzeButton_Click;
         _mergeButton.Click += MergeButton_Click;
+        _firstSource.TextChanged += (_, _) => _plan = null;
+        _secondSource.TextChanged += (_, _) => _plan = null;
     }
 
     private static TextBox CreatePathTextBox() => new() { Dock = DockStyle.Fill, Margin = new Padding(3), AllowDrop = true };
@@ -99,12 +105,18 @@ public sealed class MainForm : Form
 
     private async void MergeButton_Click(object? sender, EventArgs e)
     {
+        if (_plan is null)
+        {
+            MessageBox.Show(this, "Primero ejecute el análisis y confirme las decisiones de conflicto.", "CodexSync", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
         _log.Clear();
         SetBusy(true);
         try
         {
             var merger = new CodexHistoryMerger(AppendLog);
-            await merger.MergeAsync(_firstSource.Text, _secondSource.Text, _output.Text, _sqlite.Text, CancellationToken.None);
+            await merger.MergeAsync(_firstSource.Text, _secondSource.Text, _output.Text, _sqlite.Text, _plan, CancellationToken.None);
             AppendLog("\r\nFusión terminada correctamente.");
             MessageBox.Show(this, "La carpeta de salida está lista para usarse como .codex.", "CodexSync", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -119,9 +131,41 @@ public sealed class MainForm : Form
         }
     }
 
+    private async void AnalyzeButton_Click(object? sender, EventArgs e)
+    {
+        _log.Clear();
+        SetBusy(true);
+        try
+        {
+            var merger = new CodexHistoryMerger(AppendLog);
+            var plan = await merger.AnalyzeAsync(_firstSource.Text, _secondSource.Text, CancellationToken.None);
+            SetBusy(false);
+            using var dialog = new ConversationAnalysisDialog(plan);
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                AppendLog("Análisis cancelado; no se modificaron decisiones.");
+                return;
+            }
+
+            _plan = plan;
+            var conflicts = plan.Entries.Count(entry => entry.Status == ConversationStatus.Conflict);
+            AppendLog($"Análisis confirmado: {plan.Entries.Count} sesiones; {conflicts} conflictos resueltos en la ventana de resumen.");
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"\r\nERROR en análisis: {ex.Message}");
+            MessageBox.Show(this, ex.Message, "No se pudo analizar", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
+    }
+
     private void SetBusy(bool busy)
     {
         _mergeButton.Enabled = !busy;
+        _analyzeButton.Enabled = !busy;
         _progress.Visible = busy;
         UseWaitCursor = busy;
     }
